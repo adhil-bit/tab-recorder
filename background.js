@@ -6,7 +6,7 @@
 
 const OFFSCREEN_PATH = 'offscreen.html';
 const DOWNLOAD_FOLDER = 'Tab Recordings';
-const DEFAULT_TITLE = 'Record this tab (right-click for audio or video)';
+const DEFAULT_TITLE = 'Tab Recorder';
 const DEFAULT_PREFS = {
   mode: 'audio', // 'audio' | 'video'
   format: 'mp3',
@@ -52,9 +52,9 @@ function updateBadge(rec) {
   chrome.action.setTitle({
     title:
       rec.status === 'recording'
-        ? `Recording ${what}: ${rec.title} (click to show controls)`
+        ? `Recording ${what}: ${rec.title}`
         : rec.status === 'paused'
-          ? `Paused: ${rec.title} (click to show controls)`
+          ? `Paused: ${rec.title}`
           : DEFAULT_TITLE,
   });
 }
@@ -236,6 +236,7 @@ async function startRecording({ streamId, tab, prefs, mode }) {
     url: tab.url || '',
     mode: video ? 'video' : 'audio',
     format: video ? p.videoFormat : p.format,
+    videoQuality: String(p.videoQuality),
     bitrate: Number(p.bitrate),
     saveAs: !!p.saveAs,
     startedAt: now,
@@ -343,9 +344,8 @@ async function handleUserInvoke(tab, { stopIfActive = false, mode } = {}) {
 
 // ---------------------------------------------------------------- events
 
-chrome.action.onClicked.addListener((tab) => handleUserInvoke(tab));
-
-// Right-click the toolbar icon to choose audio or video for one recording.
+// A normal click on the toolbar icon opens popup.html (choose audio/video, then Start).
+// Right-click the toolbar icon to start audio or video straight away.
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({ id: 'record-audio', title: 'Record audio of this tab', contexts: ['action'] });
@@ -363,7 +363,18 @@ chrome.commands.onCommand.addListener((command, tab) => {
 });
 
 const actions = {
-  start: (msg) => startRecording(msg),
+  // From the popup: start, then hand over to the floating controls.
+  start: async (msg) => {
+    await startRecording(msg);
+    showControls(msg.tab).catch(() => {});
+  },
+  // From the popup while recording: bring the floating controls back.
+  'show-controls': async ({ tab }) => {
+    const rec = await getRec();
+    if (isActive(rec)) await setRec({ ...rec, overlayHidden: false });
+    const t = tab && tab.id != null ? tab : rec.tabId != null ? { id: rec.tabId } : null;
+    if (t) await showControls(t);
+  },
   stop: () => stopRecording(),
   pause: () => pauseRecording(),
   resume: () => resumeRecording(),

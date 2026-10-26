@@ -4,8 +4,8 @@ A Chrome extension that records the **audio or video** of any browser tab (YouTu
 
 ## Features
 
-- **One click to record.** Click the toolbar icon and the current tab starts recording right away.
-- **Audio or video.** Pick the default in settings, or right-click the icon and choose **Record audio of this tab** or **Record video of this tab** for a single recording.
+- **Simple popup.** Click the toolbar icon to choose audio or video, the format and the quality, then press **Start**.
+- **Quick start.** Right-click the icon and choose **Record audio of this tab** or **Record video of this tab** to skip the popup.
 - **Floating control bar** shows a timer and live level, with buttons to pause or resume, stop and save, and hide.
   - Audio recordings: the bar sits on the page. Drag it anywhere and it stays where you put it.
   - Video recordings: the bar opens in its own small window, so it doesn't show up in your video.
@@ -30,21 +30,22 @@ Requires Chrome 116 or newer. MP4 video needs Chrome 126 or newer. On older vers
 ## Usage
 
 1. Open the tab you want to record.
-2. Click the extension icon to record with your default mode (audio, unless you change it). To pick audio or video for this one recording, right-click the icon instead.
-3. Use the control bar to **pause/resume**, **stop** (saves the file), or **×** to hide it. Hiding the controls doesn't stop the recording. Click the icon again to bring them back.
+2. Click the extension icon. In the popup, choose **Audio** or **Video**, pick a format and quality, and press **Start**. To skip the popup, right-click the icon and choose **Record audio of this tab** or **Record video of this tab**.
+3. The popup closes and the control bar appears. Use it to **pause/resume**, **stop** (saves the file), or **×** to hide it. Hiding the controls doesn't stop the recording. While recording, clicking the icon opens the popup with a timer and its own pause and stop buttons.
 4. After saving, the bar shows the length and file size, with a button that opens the file's folder.
 
-**Settings:** right-click the toolbar icon and choose **Options**. You can set the default mode (audio or video), the audio format and quality, the video format and quality, whether you keep hearing the audio, and whether Chrome asks where to save each file.
+The popup remembers your last choices. The same settings are on the **Options** page (right-click the icon → **Options**).
 
 ## How it works
 
 | File | Role |
 | --- | --- |
 | `manifest.json` | Manifest V3 config with the `tabCapture`, `offscreen`, `scripting`, `contextMenus`, `downloads`, `storage` and `activeTab` permissions |
-| `background.js` | Service worker. It handles the icon click, right-click menu and shortcut, start, pause, stop and saving, and the badge. |
+| `background.js` | Service worker. It handles starting from the popup, the right-click menu and the shortcut, plus pause, stop, saving and the badge. |
 | `overlay.js` | The control bar. It's injected into the page for audio, or runs in `controls.html` for video. It sits inside a closed shadow root so the page's styles can't affect it. |
 | `controls.html` | The small window that holds the control bar during video recordings |
-| `options.html/css/js` | Settings page |
+| `popup.html/css/js` | Toolbar popup: choose audio or video, format and quality, then start. While recording it shows a timer with pause and stop. |
+| `options.html/css/js` | Settings page (same settings as the popup) |
 | `offscreen.html/js` | Offscreen document that holds the captured tab stream in the background |
 | `recorder-core.js` | Recording engine. MediaRecorder handles video and WebM audio. An AudioWorklet feeds raw PCM to the MP3 and WAV encoders. |
 | `recorder-worklet.js` | AudioWorklet that collects PCM samples |
