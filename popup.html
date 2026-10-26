@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tab Audio Recorder</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <img src="icons/icon32.png" alt="" width="20" height="20" />
+        <span>Tab Audio Recorder</span>
+      </div>
+      <span id="statusPill" class="pill">Ready</span>
+    </header>
+
+    <section class="source" id="source">
+      <div class="favicon-wrap"><img id="srcIcon" alt="" /></div>
+      <div class="src-text">
+        <div id="srcTitle" class="src-title">—</div>
+        <div id="srcMeta" class="src-meta"></div>
+      </div>
+    </section>
+
+    <!-- Idle: choose options and start -->
+    <section id="idleView" class="view">
+      <div class="field">
+        <span class="label">Format</span>
+        <div class="seg" id="formatSeg" role="radiogroup" aria-label="Format">
+          <button type="button" role="radio" data-format="mp3">MP3</button>
+          <button type="button" role="radio" data-format="wav">WAV</button>
+          <button type="button" role="radio" data-format="webm">WebM</button>
+        </div>
+      </div>
+
+      <div class="field" id="qualityField">
+        <label class="label" for="bitrate">Quality</label>
+        <select id="bitrate">
+          <option value="128">128 kbps · smaller files</option>
+          <option value="192">192 kbps · balanced</option>
+          <option value="256">256 kbps · high</option>
+          <option value="320">320 kbps · best</option>
+        </select>
+      </div>
+      <p class="hint" id="formatHint"></p>
+
+      <label class="toggle">
+        <input type="checkbox" id="monitor" />
+        <span class="switch" aria-hidden="true"></span>
+        <span>Keep playing audio while recording</span>
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="saveAs" />
+        <span class="switch" aria-hidden="true"></span>
+        <span>Ask where to save each file</span>
+      </label>
+
+      <button id="startBtn" class="btn btn-rec" type="button">
+        <span class="rec-dot" aria-hidden="true"></span>
+        <span id="startLabel">Start recording</span>
+      </button>
+    </section>
+
+    <!-- Recording / paused -->
+    <section id="activeView" class="view" hidden>
+      <div class="timer-row">
+        <span class="live-dot" id="liveDot" aria-hidden="true"></span>
+        <span class="timer" id="timer">00:00</span>
+      </div>
+      <div class="meter" aria-hidden="true"><div class="meter-fill" id="meterFill"></div></div>
+      <div class="stats">
+        <span id="fmtLabel">MP3 · 192 kbps</span>
+        <span id="sizeEst">≈ 0 KB</span>
+      </div>
+      <div class="actions">
+        <button id="pauseBtn" class="btn btn-secondary" type="button">Pause</button>
+        <button id="stopBtn" class="btn btn-stop" type="button">
+          <span class="stop-square" aria-hidden="true"></span>Stop &amp; save
+        </button>
+      </div>
+      <button id="gotoTab" class="linkbtn" type="button" hidden>Go to the tab being recorded →</button>
+    </section>
+
+    <!-- Encoding / saving -->
+    <section id="savingView" class="view saving" hidden>
+      <div class="spinner" aria-hidden="true"></div>
+      <span>Encoding and saving…</span>
+    </section>
+
+    <div id="result" class="result" hidden>
+      <div class="result-main">
+        <span class="check" aria-hidden="true">✓</span>
+        <div class="result-text">
+          <div class="result-title">Saved</div>
+          <div class="result-file" id="resultFile"></div>
+        </div>
+      </div>
+      <button id="showFile" class="linkbtn" type="button">Show in folder</button>
+    </div>
+
+    <div id="error" class="error" role="alert" hidden></div>
+
+    <footer class="foot">
+      <span id="shortcut"></span>
+      <span>Saves to Downloads/Tab Recordings</span>
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
