@@ -1,4 +1,4 @@
-/* global TabAudioRecorder */
+/* global TabRecorder */
 // Offscreen document: owns the captured tab stream and the recorder.
 // The service worker talks to it with { target: 'offscreen', type, ... } messages.
 
@@ -41,7 +41,7 @@ const handlers = {
         : false,
     });
 
-    const rec = new TabAudioRecorder({
+    const rec = new TabRecorder({
       stream,
       format,
       bitrate,

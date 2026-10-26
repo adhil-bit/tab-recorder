@@ -63,7 +63,7 @@ async function flashError(message) {
   await setLastResult({ ok: false, error: message, at: Date.now() });
   chrome.action.setBadgeText({ text: 'ERR' });
   chrome.action.setBadgeBackgroundColor({ color: '#5c6370' });
-  chrome.action.setTitle({ title: `Tab Audio Recorder: ${message}` });
+  chrome.action.setTitle({ title: `Tab Recorder: ${message}` });
   setTimeout(async () => updateBadge(await getRec()), 4000);
 }
 

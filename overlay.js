@@ -5,8 +5,8 @@
 // service worker. Lives in a closed shadow root so page styles can't touch it.
 
 (() => {
-  if (window.__tabAudioRecorderBar) {
-    window.__tabAudioRecorderBar.show();
+  if (window.__tabRecorderBar) {
+    window.__tabRecorderBar.show();
     return;
   }
 
@@ -90,14 +90,14 @@
 
   // ------------------------------------------------------------- DOM
 
-  const host = document.createElement('tab-audio-recorder-bar');
+  const host = document.createElement('tab-recorder-bar');
   host.style.cssText = EMBED
     ? 'all: initial; display: block;'
     : 'all: initial; position: fixed; z-index: 2147483647; right: 24px; bottom: 24px;';
   const root = host.attachShadow({ mode: 'closed' });
   root.innerHTML = `
     <style>${CSS}</style>
-    <div class="bar" role="toolbar" aria-label="Tab Audio Recorder">
+    <div class="bar" role="toolbar" aria-label="Tab Recorder">
       <div class="status" title="${EMBED ? '' : 'Drag to move'}">
         <span class="dot"></span>
         <span class="kind" title="Recording video">${ICON.video}</span>
@@ -389,10 +389,10 @@
     } catch {
       /* context gone */
     }
-    delete window.__tabAudioRecorderBar;
+    delete window.__tabRecorderBar;
   }
 
   chrome.storage.onChanged.addListener(onStorage);
-  window.__tabAudioRecorderBar = { show };
+  window.__tabRecorderBar = { show };
   show();
 })();

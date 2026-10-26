@@ -123,7 +123,7 @@
     }
   }
 
-  class TabAudioRecorder {
+  class TabRecorder {
     /**
      * @param {object} opts
      * @param {MediaStream} opts.stream  audio stream to record
@@ -295,6 +295,6 @@
     }
   }
 
-  TabAudioRecorder.FORMATS = FORMATS;
-  global.TabAudioRecorder = TabAudioRecorder;
+  TabRecorder.FORMATS = FORMATS;
+  global.TabRecorder = TabRecorder;
 })(typeof self !== 'undefined' ? self : this);

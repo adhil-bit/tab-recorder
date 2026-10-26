@@ -1,4 +1,4 @@
-# Tab Audio Recorder
+# Tab Recorder
 
 A Chrome extension that records the **audio or video** of any browser tab (YouTube, Spotify Web Player, SoundCloud, podcasts, web calls) and saves it as **MP3**, **WAV** or **WebM** audio, or as **MP4**/**WebM** video.
 
@@ -22,7 +22,7 @@ A Chrome extension that records the **audio or video** of any browser tab (YouTu
 1. Download this repo (**Code → Download ZIP**) and unzip it.
 2. Open `chrome://extensions` in Chrome.
 3. Turn on **Developer mode** (top right).
-4. Click **Load unpacked** and select the unzipped `tab-audio-recorder` folder.
+4. Click **Load unpacked** and select the unzipped `tab-recorder` folder.
 5. Pin the extension from the puzzle-piece menu so the icon is easy to reach.
 
 Requires Chrome 116 or newer. MP4 video needs Chrome 126 or newer. On older versions it falls back to WebM. Should also work in other Chromium browsers such as Edge, Brave or Arc.
