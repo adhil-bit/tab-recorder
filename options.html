@@ -12,13 +12,41 @@
         <img src="icons/icon48.png" alt="" width="36" height="36" />
         <div>
           <h1>Tab Audio Recorder</h1>
-          <p class="sub">Click the toolbar icon on any tab to start recording. A small bar appears on the page with pause, stop and hide.</p>
+          <p class="sub">Click the toolbar icon on any tab to start recording. A small bar appears on the page with pause, stop and hide. Right-click the icon to pick audio or video for a single recording.</p>
         </div>
       </header>
 
       <section class="group">
         <div class="field">
-          <span class="label">Format</span>
+          <span class="label">When I click the icon, record</span>
+          <div class="seg" id="modeSeg" role="radiogroup" aria-label="What to record">
+            <button type="button" role="radio" data-mode="audio">Audio only</button>
+            <button type="button" role="radio" data-mode="video">Video + audio</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="group" id="videoGroup">
+        <div class="field">
+          <span class="label">Video format</span>
+          <div class="seg" id="videoFormatSeg" role="radiogroup" aria-label="Video format">
+            <button type="button" role="radio" data-vformat="mp4">MP4</button>
+            <button type="button" role="radio" data-vformat="webm">WebM</button>
+          </div>
+        </div>
+        <div class="field">
+          <label class="label" for="videoQuality">Video quality</label>
+          <select id="videoQuality">
+            <option value="720">720p · smaller files</option>
+            <option value="1080">1080p · sharp</option>
+          </select>
+        </div>
+        <p class="hint" id="videoHint"></p>
+      </section>
+
+      <section class="group" id="audioGroup">
+        <div class="field">
+          <span class="label">Audio format</span>
           <div class="seg" id="formatSeg" role="radiogroup" aria-label="Format">
             <button type="button" role="radio" data-format="mp3">MP3</button>
             <button type="button" role="radio" data-format="wav">WAV</button>

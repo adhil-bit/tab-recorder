@@ -1,15 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Tab Audio Recorder",
-  "version": "1.1.0",
-  "description": "Record the audio playing in any tab (YouTube, Spotify, podcasts, calls…) and save it as MP3, WAV or WebM.",
+  "version": "1.2.0",
+  "description": "Record the audio or video of any tab (YouTube, Spotify, podcasts, calls…) and save it as MP3, WAV, WebM or MP4.",
   "minimum_chrome_version": "116",
-  "permissions": ["tabCapture", "offscreen", "storage", "downloads", "activeTab", "scripting"],
+  "permissions": ["tabCapture", "offscreen", "storage", "downloads", "activeTab", "scripting", "contextMenus"],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Record this tab's audio",
+    "default_title": "Record this tab (right-click for audio or video)",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",

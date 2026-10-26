@@ -4,16 +4,52 @@
 
 let recorder = null;
 
+const VIDEO_QUALITY = {
+  720: { maxWidth: 1280, maxHeight: 720, bitrate: 5000000 },
+  1080: { maxWidth: 1920, maxHeight: 1080, bitrate: 8000000 },
+};
+
+// Scale the tab's size to fit inside the quality box, keeping its shape, so the
+// video has no black bars.
+function fitSize(w, h, maxW, maxH) {
+  if (!w || !h) return { width: maxW, height: maxH };
+  const s = Math.min(maxW / w, maxH / h);
+  const even = (n) => Math.max(2, Math.round(n / 2) * 2);
+  return { width: even(w * s), height: even(h * s) };
+}
+
 const handlers = {
-  async start({ streamId, format, bitrate, monitor }) {
+  async start({ streamId, format, bitrate, monitor, video, videoFormat, videoQuality, tabWidth, tabHeight }) {
     if (recorder) throw new Error('A recording is already in progress.');
 
+    const q = VIDEO_QUALITY[videoQuality] || VIDEO_QUALITY[1080];
+    const source = { chromeMediaSource: 'tab', chromeMediaSourceId: streamId };
+    const { width, height } = fitSize(tabWidth, tabHeight, q.maxWidth, q.maxHeight);
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: streamId } },
-      video: false,
+      audio: { mandatory: source },
+      video: video
+        ? {
+            mandatory: {
+              ...source,
+              minWidth: width,
+              maxWidth: width,
+              minHeight: height,
+              maxHeight: height,
+              maxFrameRate: 30,
+            },
+          }
+        : false,
     });
 
-    const rec = new TabAudioRecorder({ stream, format, bitrate, monitor });
+    const rec = new TabAudioRecorder({
+      stream,
+      format,
+      bitrate,
+      monitor,
+      video: !!video,
+      videoFormat,
+      videoBitrate: q.bitrate,
+    });
     recorder = rec;
 
     // Tab closed or capture revoked: let the service worker finish and save.

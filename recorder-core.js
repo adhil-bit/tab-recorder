@@ -1,7 +1,8 @@
 /* global lamejs */
-// Recording engine: takes a MediaStream (the captured tab audio) and turns it
-// into an MP3, WAV or WebM blob. Kept free of chrome.* APIs so it can be tested
-// on its own.
+/* global ysFixWebmDuration */
+// Recording engine: takes a MediaStream (the captured tab) and turns it into an
+// MP3, WAV or WebM audio file, or an MP4/WebM video. Kept free of chrome.* APIs
+// so it can be tested on its own.
 
 (function (global) {
   'use strict';
@@ -13,6 +14,40 @@
     wav: { ext: 'wav', mime: 'audio/wav' },
     webm: { ext: 'webm', mime: 'audio/webm' },
   };
+
+  // Video containers, best first. Chrome 126+ can record MP4 (H.264 + AAC);
+  // otherwise fall back to WebM (VP9/VP8 + Opus).
+  const VIDEO_TYPES = {
+    mp4: [
+      'video/mp4;codecs=avc1.640028,mp4a.40.2',
+      'video/mp4;codecs=avc1.4d0028,mp4a.40.2',
+      'video/mp4;codecs=avc1,mp4a.40.2',
+      'video/mp4;codecs=avc1,opus',
+      'video/mp4',
+    ],
+    webm: ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'],
+  };
+
+  function pickVideoType(preferred) {
+    const order = preferred === 'webm' ? ['webm', 'mp4'] : ['mp4', 'webm'];
+    for (const container of order) {
+      for (const mimeType of VIDEO_TYPES[container]) {
+        if (MediaRecorder.isTypeSupported(mimeType)) return { mimeType, container };
+      }
+    }
+    throw new Error('Video recording is not supported in this browser');
+  }
+
+  // MediaRecorder writes WebM files without a duration, which breaks seeking in
+  // some players. Patch it in when the file is small enough to rewrite in memory.
+  async function fixWebmDuration(blob, durationMs) {
+    if (typeof ysFixWebmDuration !== 'function' || blob.size > 512 * 1024 * 1024) return blob;
+    try {
+      return await ysFixWebmDuration(blob, durationMs, { logger: false });
+    } catch (e) {
+      return blob;
+    }
+  }
 
   function floatToInt16(input) {
     const out = new Int16Array(input.length);
@@ -96,14 +131,29 @@
      * @param {number} opts.bitrate      kbps (MP3 / WebM)
      * @param {boolean} opts.monitor     keep playing the audio to the speakers
      * @param {string} opts.workletUrl
+     * @param {boolean} opts.video       record the stream's video track too
+     * @param {'mp4'|'webm'} opts.videoFormat  preferred video container
+     * @param {number} opts.videoBitrate bits per second
      */
-    constructor({ stream, format = 'mp3', bitrate = 192, monitor = true, workletUrl = 'recorder-worklet.js' }) {
-      if (!FORMATS[format]) throw new Error('Unknown format: ' + format);
+    constructor({
+      stream,
+      format = 'mp3',
+      bitrate = 192,
+      monitor = true,
+      workletUrl = 'recorder-worklet.js',
+      video = false,
+      videoFormat = 'mp4',
+      videoBitrate = 8000000,
+    }) {
+      if (!video && !FORMATS[format]) throw new Error('Unknown format: ' + format);
       this.stream = stream;
       this.format = format;
       this.bitrate = bitrate;
       this.monitor = monitor;
       this.workletUrl = workletUrl;
+      this.video = video;
+      this.videoFormat = videoFormat;
+      this.videoBitrate = videoBitrate;
       this.state = 'idle';
       this.activeMs = 0;
       this.resumedAt = 0;
@@ -122,14 +172,26 @@
       this.levelBuf = new Float32Array(this.analyser.fftSize);
       this.source.connect(this.analyser);
 
-      if (this.format === 'webm') {
-        const mimeType = 'audio/webm;codecs=opus';
-        if (!MediaRecorder.isTypeSupported(mimeType)) throw new Error('WebM/Opus recording is not supported');
+      if (this.video || this.format === 'webm') {
+        let options;
+        if (this.video) {
+          const picked = pickVideoType(this.videoFormat);
+          this.container = picked.container;
+          this.outMime = 'video/' + picked.container;
+          options = {
+            mimeType: picked.mimeType,
+            videoBitsPerSecond: this.videoBitrate,
+            audioBitsPerSecond: 192000,
+          };
+        } else {
+          const mimeType = 'audio/webm;codecs=opus';
+          if (!MediaRecorder.isTypeSupported(mimeType)) throw new Error('WebM/Opus recording is not supported');
+          this.container = 'webm';
+          this.outMime = FORMATS.webm.mime;
+          options = { mimeType, audioBitsPerSecond: this.bitrate * 1000 };
+        }
         this.chunks = [];
-        this.mediaRecorder = new MediaRecorder(this.stream, {
-          mimeType,
-          audioBitsPerSecond: this.bitrate * 1000,
-        });
+        this.mediaRecorder = new MediaRecorder(this.stream, options);
         this.mediaRecorder.ondataavailable = (e) => {
           if (e.data && e.data.size) this.chunks.push(e.data);
         };
@@ -205,7 +267,8 @@
       if (this.mediaRecorder) {
         if (this.mediaRecorder.state !== 'inactive') this.mediaRecorder.stop();
         await this.recorderStopped;
-        blob = new Blob(this.chunks, { type: FORMATS.webm.mime });
+        blob = new Blob(this.chunks, { type: this.outMime });
+        if (this.container === 'webm') blob = await fixWebmDuration(blob, elapsed);
       } else {
         await new Promise((resolve) => {
           this.onFlushed = resolve;
@@ -218,8 +281,10 @@
 
       this.teardown();
       this.state = 'stopped';
-      const { ext, mime } = FORMATS[this.format];
-      return { blob, ext, mime, durationSec, size: blob.size };
+      const { ext, mime } = this.video
+        ? { ext: this.container, mime: this.outMime }
+        : FORMATS[this.format];
+      return { blob, ext, mime, durationSec, size: blob.size, video: this.video };
     }
 
     teardown() {

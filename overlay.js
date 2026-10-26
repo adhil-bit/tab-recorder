@@ -1,4 +1,6 @@
-// Floating control bar injected into the page when the toolbar icon is clicked.
+// Floating control bar. For audio recordings it's injected into the page when
+// the toolbar icon is clicked. For video recordings the same bar runs inside a
+// small separate window (controls.html), so it doesn't appear in the video.
 // Reads recording state from chrome.storage.session and sends commands to the
 // service worker. Lives in a closed shadow root so page styles can't touch it.
 
@@ -7,6 +9,9 @@
     window.__tabAudioRecorderBar.show();
     return;
   }
+
+  // true when running in controls.html (its own window), false when injected into a page
+  const EMBED = location.protocol === 'chrome-extension:';
 
   const SAVED_VISIBLE_MS = 8000;
   const ERROR_VISIBLE_MS = 10000;
@@ -26,6 +31,8 @@
       '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     alert:
       '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M8 3.5v5.5M8 12v.4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
+    video:
+      '<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1.5" y="4" width="9" height="8" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10.5 7.2l3.2-2v5.6l-3.2-2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
   };
 
   const CSS = `
@@ -61,6 +68,7 @@
     .dot.spin { width: 14px; height: 14px; background: none; border: 2px solid rgba(255,255,255,0.2); border-top-color: #fff; animation: spin 0.8s linear infinite; }
     @keyframes pulse { 50% { opacity: 0.3; } }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .kind { display: grid; place-items: center; color: #9fa3ad; margin: 0 -2px; }
     .time { font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; min-width: 40px; }
     .meter { display: flex; align-items: center; gap: 2px; height: 16px; }
     .meter i { display: block; width: 3px; height: 3px; border-radius: 2px; background: #9fa3ad; transition: height 0.09s linear; }
@@ -83,13 +91,16 @@
   // ------------------------------------------------------------- DOM
 
   const host = document.createElement('tab-audio-recorder-bar');
-  host.style.cssText = 'all: initial; position: fixed; z-index: 2147483647; right: 24px; bottom: 24px;';
+  host.style.cssText = EMBED
+    ? 'all: initial; display: block;'
+    : 'all: initial; position: fixed; z-index: 2147483647; right: 24px; bottom: 24px;';
   const root = host.attachShadow({ mode: 'closed' });
   root.innerHTML = `
     <style>${CSS}</style>
     <div class="bar" role="toolbar" aria-label="Tab Audio Recorder">
-      <div class="status" title="Drag to move">
+      <div class="status" title="${EMBED ? '' : 'Drag to move'}">
         <span class="dot"></span>
+        <span class="kind" title="Recording video">${ICON.video}</span>
         <span class="time">00:00</span>
         <span class="meter"><i></i><i></i><i></i><i></i><i></i></span>
         <span class="msg"></span>
@@ -106,6 +117,7 @@
   const el = {
     status: $('.status'),
     dot: $('.dot'),
+    kind: $('.kind'),
     time: $('.time'),
     meter: $('.meter'),
     bars: [...root.querySelectorAll('.meter i')],
@@ -162,6 +174,10 @@
   async function mount() {
     if (mounted) return;
     mounted = true;
+    if (EMBED) {
+      document.body.appendChild(host);
+      return;
+    }
     (document.documentElement || document.body).appendChild(host);
     try {
       const { overlayPos } = await chrome.storage.local.get('overlayPos');
@@ -176,6 +192,7 @@
     host.remove();
     stopLoops();
     clearTimeout(hideTimer);
+    if (EMBED) window.close();
   }
 
   function placeAt(left, top) {
@@ -190,8 +207,10 @@
     host.style.bottom = 'auto';
   }
 
+  if (EMBED) el.status.style.cursor = 'default';
+
   el.status.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0) return;
+    if (EMBED || e.button !== 0) return;
     const r = host.getBoundingClientRect();
     const dx = e.clientX - r.left;
     const dy = e.clientY - r.top;
@@ -222,6 +241,7 @@
   }
 
   function show_(parts) {
+    el.kind.hidden = !(parts.time && rec.mode === 'video');
     el.time.hidden = !parts.time;
     el.meter.hidden = !parts.meter;
     el.msg.hidden = !parts.msg;
@@ -237,6 +257,8 @@
 
     if (s === 'recording' || s === 'paused') {
       if (rec.overlayHidden) return unmount();
+      // Never draw on the page during a video recording: it would end up in the video.
+      if (!EMBED && rec.mode === 'video') return unmount();
       mount();
       const paused = s === 'paused';
       setDot(paused ? 'paused' : 'rec');

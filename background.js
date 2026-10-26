@@ -6,8 +6,16 @@
 
 const OFFSCREEN_PATH = 'offscreen.html';
 const DOWNLOAD_FOLDER = 'Tab Recordings';
-const DEFAULT_TITLE = "Record this tab's audio";
-const DEFAULT_PREFS = { format: 'mp3', bitrate: 192, monitor: true, saveAs: false };
+const DEFAULT_TITLE = 'Record this tab (right-click for audio or video)';
+const DEFAULT_PREFS = {
+  mode: 'audio', // 'audio' | 'video'
+  format: 'mp3',
+  bitrate: 192,
+  videoFormat: 'mp4',
+  videoQuality: '1080',
+  monitor: true,
+  saveAs: false,
+};
 
 // Let the floating bar (a content script) read the recording state.
 chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' }).catch(() => {});
@@ -40,10 +48,11 @@ function updateBadge(rec) {
   chrome.action.setBadgeText({ text });
   if (text) chrome.action.setBadgeBackgroundColor({ color });
   if (chrome.action.setBadgeTextColor && text) chrome.action.setBadgeTextColor({ color: '#ffffff' });
+  const what = rec.mode === 'video' ? 'video' : 'audio';
   chrome.action.setTitle({
     title:
       rec.status === 'recording'
-        ? `Recording: ${rec.title} (click to show controls)`
+        ? `Recording ${what}: ${rec.title} (click to show controls)`
         : rec.status === 'paused'
           ? `Paused: ${rec.title} (click to show controls)`
           : DEFAULT_TITLE,
@@ -116,6 +125,49 @@ async function showOverlay(tabId) {
   }
 }
 
+// Video recordings get their controls in a small separate window, because
+// anything drawn on the page would be captured in the video.
+const CONTROLS_W = 340;
+const CONTROLS_H = 110;
+
+async function showControlsWindow(nearWindowId) {
+  const { controlsWinId } = await chrome.storage.session.get('controlsWinId');
+  if (controlsWinId != null) {
+    try {
+      await chrome.windows.update(controlsWinId, { focused: true });
+      return;
+    } catch {
+      /* it was closed */
+    }
+  }
+  const opts = { url: 'controls.html', type: 'popup', width: CONTROLS_W, height: CONTROLS_H, focused: true };
+  try {
+    const near = nearWindowId != null ? await chrome.windows.get(nearWindowId) : await chrome.windows.getLastFocused();
+    if (near && near.left != null) {
+      opts.left = Math.max(0, near.left + near.width - CONTROLS_W - 24);
+      opts.top = Math.max(0, near.top + near.height - CONTROLS_H - 24);
+    }
+  } catch {
+    /* let Chrome place it */
+  }
+  let win;
+  try {
+    win = await chrome.windows.create(opts);
+  } catch {
+    // Position rejected (e.g. partly off-screen): let Chrome place it.
+    delete opts.left;
+    delete opts.top;
+    win = await chrome.windows.create(opts).catch(() => null);
+  }
+  if (win) await chrome.storage.session.set({ controlsWinId: win.id });
+}
+
+async function showControls(tab) {
+  const rec = await getRec();
+  if (rec.mode === 'video' && rec.status !== 'idle') return showControlsWindow(tab && tab.windowId);
+  return showOverlay(tab.id);
+}
+
 // ---------------------------------------------------------------- helpers
 
 function cleanTitle(title) {
@@ -153,17 +205,24 @@ async function download(url, rec, ext) {
 
 // ---------------------------------------------------------------- actions
 
-async function startRecording({ streamId, tab, prefs }) {
+async function startRecording({ streamId, tab, prefs, mode }) {
   const current = await getRec();
   if (current.status !== 'idle') throw new Error('A recording is already in progress.');
 
   const p = { ...DEFAULT_PREFS, ...(prefs || {}) };
+  if (mode) p.mode = mode;
+  const video = p.mode === 'video';
   await ensureOffscreen();
   const res = await toOffscreen('start', {
     streamId,
     format: p.format,
     bitrate: Number(p.bitrate),
     monitor: !!p.monitor,
+    video,
+    videoFormat: p.videoFormat,
+    videoQuality: String(p.videoQuality),
+    tabWidth: tab.width,
+    tabHeight: tab.height,
   });
   if (!res || !res.ok) throw new Error((res && res.error) || 'Could not start recording.');
 
@@ -175,7 +234,8 @@ async function startRecording({ streamId, tab, prefs }) {
     title: cleanTitle(tab.title),
     favIconUrl: tab.favIconUrl || '',
     url: tab.url || '',
-    format: p.format,
+    mode: video ? 'video' : 'audio',
+    format: video ? p.videoFormat : p.format,
     bitrate: Number(p.bitrate),
     saveAs: !!p.saveAs,
     startedAt: now,
@@ -244,11 +304,17 @@ async function doStop() {
   } finally {
     await setRec({ status: 'idle' });
     closeOffscreenIfIdle();
+    // Video recording whose controls window was closed: confirm the save on the page.
+    if (rec.mode === 'video') {
+      const { controlsWinId } = await chrome.storage.session.get('controlsWinId');
+      if (controlsWinId == null && rec.tabId != null) showOverlay(rec.tabId);
+    }
   }
 }
 
-// Toolbar click or keyboard shortcut.
-async function handleUserInvoke(tab, { stopIfActive = false } = {}) {
+// Toolbar click, keyboard shortcut or the icon's right-click menu.
+// `mode` overrides the default from settings for this one recording.
+async function handleUserInvoke(tab, { stopIfActive = false, mode } = {}) {
   if (!tab || tab.id == null) return;
   const rec = await getRec();
 
@@ -256,28 +322,41 @@ async function handleUserInvoke(tab, { stopIfActive = false } = {}) {
     if (stopIfActive) return stopRecording();
     // Already recording: just bring the controls back.
     await setRec({ ...rec, overlayHidden: false });
-    await showOverlay(tab.id);
+    await showControls(tab);
     return;
   }
 
   if (rec.status === 'saving') {
-    await showOverlay(tab.id);
+    await showControls(tab);
     return;
   }
 
   try {
     const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
     const { prefs } = await chrome.storage.local.get('prefs');
-    await startRecording({ streamId, tab, prefs });
+    await startRecording({ streamId, tab, prefs, mode });
   } catch (err) {
     await flashError(friendlyError(err && err.message));
   }
-  await showOverlay(tab.id);
+  await showControls(tab); // errors show on the page; nothing is being recorded then
 }
 
 // ---------------------------------------------------------------- events
 
 chrome.action.onClicked.addListener((tab) => handleUserInvoke(tab));
+
+// Right-click the toolbar icon to choose audio or video for one recording.
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({ id: 'record-audio', title: 'Record audio of this tab', contexts: ['action'] });
+    chrome.contextMenus.create({ id: 'record-video', title: 'Record video of this tab', contexts: ['action'] });
+  });
+});
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === 'record-audio') handleUserInvoke(tab, { mode: 'audio' });
+  if (info.menuItemId === 'record-video') handleUserInvoke(tab, { mode: 'video' });
+});
 
 chrome.commands.onCommand.addListener((command, tab) => {
   if (command === 'toggle-recording') handleUserInvoke(tab, { stopIfActive: true });
@@ -308,11 +387,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
-// Bring the bar back after the recorded tab reloads or navigates.
+// Bring the bar back after the recorded tab reloads or navigates (audio only;
+// video recordings use the separate controls window).
 chrome.tabs.onUpdated.addListener(async (tabId, info) => {
   if (info.status !== 'complete') return;
   const rec = await getRec();
-  if (rec.tabId === tabId && isActive(rec) && !rec.overlayHidden) showOverlay(tabId);
+  if (rec.tabId === tabId && isActive(rec) && !rec.overlayHidden && rec.mode !== 'video') showOverlay(tabId);
+});
+
+// Closing the controls window during a recording just hides the controls.
+chrome.windows.onRemoved.addListener(async (windowId) => {
+  const { controlsWinId } = await chrome.storage.session.get('controlsWinId');
+  if (windowId !== controlsWinId) return;
+  await chrome.storage.session.remove('controlsWinId');
+  const rec = await getRec();
+  if (isActive(rec) && !rec.overlayHidden) await setRec({ ...rec, overlayHidden: true });
 });
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
