@@ -1,10 +1,16 @@
-// Service worker: coordinates the popup, the offscreen recorder and downloads.
-// Recording state lives in chrome.storage.session so it survives the worker
-// being suspended, and so the popup can read it directly.
+// Service worker: clicking the toolbar icon starts recording the tab and shows
+// a floating control bar (overlay.js) on the page. It coordinates the
+// offscreen recorder and saving. Recording state lives in
+// chrome.storage.session so it survives the worker being suspended, and so the
+// floating bar can read it directly.
 
 const OFFSCREEN_PATH = 'offscreen.html';
 const DOWNLOAD_FOLDER = 'Tab Recordings';
+const DEFAULT_TITLE = "Record this tab's audio";
 const DEFAULT_PREFS = { format: 'mp3', bitrate: 192, monitor: true, saveAs: false };
+
+// Let the floating bar (a content script) read the recording state.
+chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' }).catch(() => {});
 
 // ---------------------------------------------------------------- state
 
@@ -22,6 +28,8 @@ async function setLastResult(lastResult) {
   await chrome.storage.session.set({ lastResult });
 }
 
+const isActive = (rec) => rec.status === 'recording' || rec.status === 'paused';
+
 function updateBadge(rec) {
   const looks = {
     recording: ['REC', '#e5383b'],
@@ -35,10 +43,10 @@ function updateBadge(rec) {
   chrome.action.setTitle({
     title:
       rec.status === 'recording'
-        ? `Recording: ${rec.title}`
+        ? `Recording: ${rec.title} (click to show controls)`
         : rec.status === 'paused'
-          ? `Paused: ${rec.title}`
-          : 'Tab Audio Recorder',
+          ? `Paused: ${rec.title} (click to show controls)`
+          : DEFAULT_TITLE,
   });
 }
 
@@ -46,7 +54,15 @@ async function flashError(message) {
   await setLastResult({ ok: false, error: message, at: Date.now() });
   chrome.action.setBadgeText({ text: 'ERR' });
   chrome.action.setBadgeBackgroundColor({ color: '#5c6370' });
-  setTimeout(async () => updateBadge(await getRec()), 3000);
+  chrome.action.setTitle({ title: `Tab Audio Recorder: ${message}` });
+  setTimeout(async () => updateBadge(await getRec()), 4000);
+}
+
+function friendlyError(message = '') {
+  if (/active stream/i.test(message)) return 'This tab is already being recorded or shared.';
+  if (/not been invoked|activeTab/i.test(message)) return 'Click the extension icon on the tab you want to record.';
+  if (/chrome pages|cannot be captured|cannot capture/i.test(message)) return "Chrome doesn't allow recording this page.";
+  return message || 'Something went wrong.';
 }
 
 // ---------------------------------------------------------------- offscreen
@@ -86,6 +102,17 @@ async function closeOffscreenIfIdle() {
   const { pending = {} } = await chrome.storage.session.get('pending');
   if (rec.status === 'idle' && Object.keys(pending).length === 0 && (await hasOffscreen())) {
     await chrome.offscreen.closeDocument().catch(() => {});
+  }
+}
+
+// ---------------------------------------------------------------- floating bar
+
+async function showOverlay(tabId) {
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['overlay.js'] });
+    return true;
+  } catch {
+    return false; // e.g. chrome:// pages, the Web Store, PDFs
   }
 }
 
@@ -154,6 +181,7 @@ async function startRecording({ streamId, tab, prefs }) {
     startedAt: now,
     activeMs: 0,
     resumedAt: now,
+    overlayHidden: false,
   });
 }
 
@@ -181,7 +209,7 @@ function stopRecording() {
 
 async function doStop() {
   const rec = await getRec();
-  if (rec.status !== 'recording' && rec.status !== 'paused') return;
+  if (!isActive(rec)) return;
   await setRec({ ...rec, status: 'saving' });
 
   try {
@@ -219,7 +247,41 @@ async function doStop() {
   }
 }
 
+// Toolbar click or keyboard shortcut.
+async function handleUserInvoke(tab, { stopIfActive = false } = {}) {
+  if (!tab || tab.id == null) return;
+  const rec = await getRec();
+
+  if (isActive(rec)) {
+    if (stopIfActive) return stopRecording();
+    // Already recording: just bring the controls back.
+    await setRec({ ...rec, overlayHidden: false });
+    await showOverlay(tab.id);
+    return;
+  }
+
+  if (rec.status === 'saving') {
+    await showOverlay(tab.id);
+    return;
+  }
+
+  try {
+    const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
+    const { prefs } = await chrome.storage.local.get('prefs');
+    await startRecording({ streamId, tab, prefs });
+  } catch (err) {
+    await flashError(friendlyError(err && err.message));
+  }
+  await showOverlay(tab.id);
+}
+
 // ---------------------------------------------------------------- events
+
+chrome.action.onClicked.addListener((tab) => handleUserInvoke(tab));
+
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (command === 'toggle-recording') handleUserInvoke(tab, { stopIfActive: true });
+});
 
 const actions = {
   start: (msg) => startRecording(msg),
@@ -227,9 +289,17 @@ const actions = {
   pause: () => pauseRecording(),
   resume: () => resumeRecording(),
   'capture-ended': () => stopRecording(),
+  'hide-overlay': async () => {
+    const rec = await getRec();
+    if (isActive(rec)) await setRec({ ...rec, overlayHidden: true });
+  },
+  'show-download': async ({ id }) => {
+    if (typeof id === 'number') chrome.downloads.show(id);
+  },
 };
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (sender.id !== chrome.runtime.id) return false;
   if (!msg || msg.target !== 'background' || !actions[msg.type]) return false;
   actions[msg.type](msg).then(
     () => sendResponse({ ok: true }),
@@ -238,25 +308,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return true;
 });
 
-chrome.commands.onCommand.addListener(async (command, tab) => {
-  if (command !== 'toggle-recording') return;
-  try {
-    const rec = await getRec();
-    if (rec.status === 'recording' || rec.status === 'paused') {
-      await stopRecording();
-    } else if (rec.status === 'idle' && tab) {
-      const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
-      const { prefs } = await chrome.storage.local.get('prefs');
-      await startRecording({ streamId, tab, prefs });
-    }
-  } catch (err) {
-    flashError(err.message);
-  }
+// Bring the bar back after the recorded tab reloads or navigates.
+chrome.tabs.onUpdated.addListener(async (tabId, info) => {
+  if (info.status !== 'complete') return;
+  const rec = await getRec();
+  if (rec.tabId === tabId && isActive(rec) && !rec.overlayHidden) showOverlay(tabId);
 });
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   const rec = await getRec();
-  if (rec.tabId === tabId && (rec.status === 'recording' || rec.status === 'paused')) stopRecording();
+  if (rec.tabId === tabId && isActive(rec)) stopRecording();
 });
 
 chrome.downloads.onChanged.addListener(async (delta) => {
